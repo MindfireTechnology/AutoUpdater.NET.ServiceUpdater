@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace AutoUpdaterDotNET;
 
@@ -7,22 +7,22 @@ namespace AutoUpdaterDotNET;
 /// </summary>
 public class ParseUpdateInfoEventArgs : EventArgs
 {
-    /// <summary>
-    ///     An object containing the AppCast file received from server.
-    /// </summary>
-    /// <param name="remoteData">A string containing remote data received from the AppCast file.</param>
-    public ParseUpdateInfoEventArgs(string remoteData)
-    {
-        RemoteData = remoteData;
-    }
+	/// <summary>
+	///     An object containing the AppCast file received from server.
+	/// </summary>
+	/// <param name="remoteData">A string containing remote data received from the AppCast file.</param>
+	public ParseUpdateInfoEventArgs(string remoteData)
+	{
+		RemoteData = remoteData;
+	}
 
-    /// <summary>
-    ///     Remote data received from the AppCast file.
-    /// </summary>
-    public string RemoteData { get; }
+	/// <summary>
+	///     Remote data received from the AppCast file.
+	/// </summary>
+	public string RemoteData { get; }
 
-    /// <summary>
-    ///     Set this object with values received from the AppCast file.
-    /// </summary>
-    public UpdateInfoEventArgs UpdateInfo { get; set; }
+	/// <summary>
+	///     Set this object with values received from the AppCast file.
+	/// </summary>
+	public UpdateInfoEventArgs UpdateInfo { get; set; }
 }

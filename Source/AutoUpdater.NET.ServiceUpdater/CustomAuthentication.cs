@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 
 namespace AutoUpdaterDotNET;
 
@@ -7,26 +7,26 @@ namespace AutoUpdaterDotNET;
 /// </summary>
 public class CustomAuthentication : IAuthentication
 {
-    /// <summary>
-    ///     Initializes authorization header value for Custom Authentication
-    /// </summary>
-    /// <param name="httpRequestHeaderAuthorizationValue">Value to use as http request header authorization value</param>
-    public CustomAuthentication(string httpRequestHeaderAuthorizationValue)
-    {
-        HttpRequestHeaderAuthorizationValue = httpRequestHeaderAuthorizationValue;
-    }
+	/// <summary>
+	///     Initializes authorization header value for Custom Authentication
+	/// </summary>
+	/// <param name="httpRequestHeaderAuthorizationValue">Value to use as http request header authorization value</param>
+	public CustomAuthentication(string httpRequestHeaderAuthorizationValue)
+	{
+		HttpRequestHeaderAuthorizationValue = httpRequestHeaderAuthorizationValue;
+	}
 
-    private string HttpRequestHeaderAuthorizationValue { get; }
+	private string HttpRequestHeaderAuthorizationValue { get; }
 
-    /// <inheritdoc />
-    public void Apply(ref MyWebClient webClient)
-    {
-        webClient.Headers[HttpRequestHeader.Authorization] = ToString();
-    }
+	/// <inheritdoc />
+	public void Apply(ref MyWebClient webClient)
+	{
+		webClient.Headers[HttpRequestHeader.Authorization] = ToString();
+	}
 
-    /// <inheritdoc />
-    public override string ToString()
-    {
-        return HttpRequestHeaderAuthorizationValue;
-    }
+	/// <inheritdoc />
+	public override string ToString()
+	{
+		return HttpRequestHeaderAuthorizationValue;
+	}
 }
