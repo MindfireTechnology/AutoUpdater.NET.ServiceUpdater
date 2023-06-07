@@ -16,11 +16,17 @@ namespace ZipExtractor;
 public partial class FormMain : Form
 {
 	private const int MaxRetries = 2;
-	private readonly StringBuilder _logBuilder = new();
-	private BackgroundWorker _backgroundWorker;
+	protected StringBuilder LogBuilder { get; init; } = new();
+	protected BackgroundWorker BackgroundTask { get; init; }
 
 	public FormMain()
 	{
+		BackgroundTask = new BackgroundWorker
+		{
+			WorkerReportsProgress = true,
+			WorkerSupportsCancellation = true
+		};
+
 		InitializeComponent();
 	}
 
@@ -30,12 +36,13 @@ public partial class FormMain : Form
 		string extractionPath = null;
 		string currentExe = null;
 		string updatedExe = null;
-		var clearAppDirectory = false;
+		bool clearAppDirectory = false;
 		string commandLineArgs = null;
+		string serviceName = null;
 
-		_logBuilder.AppendLine(DateTime.Now.ToString("F"));
-		_logBuilder.AppendLine();
-		_logBuilder.AppendLine("ZipExtractor started with following command line arguments.");
+		LogBuilder.AppendLine(DateTime.Now.ToString("F"));
+		LogBuilder.AppendLine();
+		LogBuilder.AppendLine("ZipExtractor started with following command line arguments.");
 
 		string[] args = Environment.GetCommandLineArgs();
 		for (var index = 0; index < args.Length; index++)
@@ -63,15 +70,19 @@ public partial class FormMain : Form
 					clearAppDirectory = true;
 					break;
 
+				case "--service-name":
+					serviceName = args[index + 1];
+					break;
+
 				case "--args":
 					commandLineArgs = args[index + 1];
 					break;
 			}
 
-			_logBuilder.AppendLine($"[{index}] {arg}");
+			LogBuilder.AppendLine($"[{index}] {arg}");
 		}
 
-		_logBuilder.AppendLine();
+		LogBuilder.AppendLine();
 
 		if (string.IsNullOrEmpty(zipPath) || string.IsNullOrEmpty(extractionPath) || string.IsNullOrEmpty(currentExe))
 		{
@@ -79,31 +90,33 @@ public partial class FormMain : Form
 		}
 
 		// Extract all the files.
-		_backgroundWorker = new BackgroundWorker
+		BackgroundTask.DoWork += (_, eventArgs) =>
 		{
-			WorkerReportsProgress = true,
-			WorkerSupportsCancellation = true
-		};
+			LogBuilder.AppendLine("BackgroundWorker started successfully.");
 
-		_backgroundWorker.DoWork += (_, eventArgs) =>
-		{
-			foreach (Process process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(currentExe)))
-				try
-				{
-					if (process.MainModule is { FileName: not null } && process.MainModule.FileName.Equals(currentExe))
+			if (string.IsNullOrWhiteSpace(serviceName) is false)
+			{
+				StopService(serviceName, 5);
+			}
+			else
+			{ 
+				foreach (Process process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(currentExe)))
+					try
 					{
-						_logBuilder.AppendLine("Waiting for application process to exit...");
+						if (process.MainModule is { FileName: not null } && process.MainModule.FileName.Equals(currentExe))
+						{
+							LogBuilder.AppendLine("Waiting for application process to exit...");
 
-						_backgroundWorker.ReportProgress(0, "Waiting for application to exit...");
-						process.WaitForExit();
+							BackgroundTask.ReportProgress(0, "Waiting for application to exit...");
+							process.WaitForExit();
+						}
 					}
-				}
-				catch (Exception exception)
-				{
-					Debug.WriteLine(exception.Message);
-				}
+					catch (Exception exception)
+					{
+						Debug.WriteLine(exception.Message);
+					}
+			}
 
-			_logBuilder.AppendLine("BackgroundWorker started successfully.");
 
 			// Ensures that the last character on the extraction path
 			// is the directory separator char.
@@ -124,30 +137,30 @@ public partial class FormMain : Form
 
 				if (clearAppDirectory)
 				{
-					_logBuilder.AppendLine($"Removing all files and folders from \"{extractionPath}\".");
+					LogBuilder.AppendLine($"Removing all files and folders from \"{extractionPath}\".");
 					var directoryInfo = new DirectoryInfo(extractionPath);
 
 					foreach (FileInfo file in directoryInfo.GetFiles())
 					{
-						_logBuilder.AppendLine($"Removing a file located at \"{file.FullName}\".");
-						_backgroundWorker.ReportProgress(0, string.Format(Resources.Removing, file.FullName));
+						LogBuilder.AppendLine($"Removing a file located at \"{file.FullName}\".");
+						BackgroundTask.ReportProgress(0, string.Format(Resources.Removing, file.FullName));
 						file.Delete();
 					}
 
 					foreach (DirectoryInfo directory in directoryInfo.GetDirectories())
 					{
-						_logBuilder.AppendLine(
+						LogBuilder.AppendLine(
 							$"Removing a directory located at \"{directory.FullName}\" and all its contents.");
-						_backgroundWorker.ReportProgress(0, string.Format(Resources.Removing, directory.FullName));
+						BackgroundTask.ReportProgress(0, string.Format(Resources.Removing, directory.FullName));
 						directory.Delete(true);
 					}
 				}
 
-				_logBuilder.AppendLine($"Found total of {entries.Count} files and folders inside the zip file.");
+				LogBuilder.AppendLine($"Found total of {entries.Count} files and folders inside the zip file.");
 
 				for (var index = 0; index < entries.Count; index++)
 				{
-					if (_backgroundWorker.CancellationPending)
+					if (BackgroundTask.CancellationPending)
 					{
 						eventArgs.Cancel = true;
 						break;
@@ -156,7 +169,7 @@ public partial class FormMain : Form
 					ZipArchiveEntry entry = entries[index];
 
 					string currentFile = string.Format(Resources.CurrentFileExtracting, entry.FullName);
-					_backgroundWorker.ReportProgress(progress, currentFile);
+					BackgroundTask.ReportProgress(progress, currentFile);
 					var retries = 0;
 					var notCopied = true;
 					while (notCopied)
@@ -195,58 +208,66 @@ public partial class FormMain : Form
 						}
 						catch (IOException exception)
 						{
-							const int errorSharingViolation = 0x20;
-							const int errorLockViolation = 0x21;
-							int errorCode = Marshal.GetHRForException(exception) & 0x0000FFFF;
-							if (errorCode is not (errorSharingViolation or errorLockViolation))
-							{
-								throw;
-							}
 
-							retries++;
-							if (retries > MaxRetries)
+							if (string.IsNullOrWhiteSpace(serviceName) is false)
 							{
-								throw;
+								StopService(serviceName, progress);
 							}
-
-							List<Process> lockingProcesses = null;
-							if (Environment.OSVersion.Version.Major >= 6 && retries >= 2)
-							{
-								try
-								{
-									lockingProcesses = FileUtil.WhoIsLocking(filePath);
-								}
-								catch (Exception)
-								{
-									// ignored
-								}
-							}
-
-							if (lockingProcesses == null)
-							{
-								Thread.Sleep(5000);
-								continue;
-							}
-
-							foreach (Process lockingProcess in lockingProcesses)
-							{
-								DialogResult dialogResult = MessageBox.Show(this,
-									string.Format(Resources.FileStillInUseMessage,
-										lockingProcess.ProcessName, filePath),
-									Resources.FileStillInUseCaption,
-									MessageBoxButtons.RetryCancel, MessageBoxIcon.Error);
-								if (dialogResult == DialogResult.Cancel)
+							else
+							{ 
+								const int errorSharingViolation = 0x20;
+								const int errorLockViolation = 0x21;
+								int errorCode = Marshal.GetHRForException(exception) & 0x0000FFFF;
+								if (errorCode is not (errorSharingViolation or errorLockViolation))
 								{
 									throw;
+								}
+
+								retries++;
+								if (retries > MaxRetries)
+								{
+									throw;
+								}
+
+								List<Process> lockingProcesses = null;
+								if (Environment.OSVersion.Version.Major >= 6 && retries >= 2)
+								{
+									try
+									{
+										lockingProcesses = FileUtil.WhoIsLocking(filePath);
+									}
+									catch (Exception)
+									{
+										// ignored
+									}
+								}
+
+								if (lockingProcesses == null)
+								{
+									Thread.Sleep(5000);
+									continue;
+								}
+
+								foreach (Process lockingProcess in lockingProcesses)
+								{
+									DialogResult dialogResult = MessageBox.Show(this,
+										string.Format(Resources.FileStillInUseMessage,
+											lockingProcess.ProcessName, filePath),
+										Resources.FileStillInUseCaption,
+										MessageBoxButtons.RetryCancel, MessageBoxIcon.Error);
+									if (dialogResult == DialogResult.Cancel)
+									{
+										throw;
+									}
 								}
 							}
 						}
 					}
 
 					progress = (index + 1) * 100 / entries.Count;
-					_backgroundWorker.ReportProgress(progress, currentFile);
+					BackgroundTask.ReportProgress(progress, currentFile);
 
-					_logBuilder.AppendLine($"{currentFile} [{progress}%]");
+					LogBuilder.AppendLine($"{currentFile} [{progress}%]");
 				}
 			}
 			finally
@@ -255,7 +276,7 @@ public partial class FormMain : Form
 			}
 		};
 
-		_backgroundWorker.ProgressChanged += (_, eventArgs) =>
+		BackgroundTask.ProgressChanged += (_, eventArgs) =>
 		{
 			progressBar.Value = eventArgs.ProgressPercentage;
 			textBoxInformation.Text = eventArgs.UserState?.ToString();
@@ -268,7 +289,7 @@ public partial class FormMain : Form
 			textBoxInformation.SelectionLength = 0;
 		};
 
-		_backgroundWorker.RunWorkerCompleted += (_, eventArgs) =>
+		BackgroundTask.RunWorkerCompleted += (_, eventArgs) =>
 		{
 			try
 			{
@@ -285,18 +306,24 @@ public partial class FormMain : Form
 				textBoxInformation.Text = @"Finished";
 				try
 				{
-					string executablePath = string.IsNullOrWhiteSpace(updatedExe)
-						? currentExe
-						: Path.Combine(extractionPath, updatedExe);
-					var processStartInfo = new ProcessStartInfo(executablePath);
-					if (!string.IsNullOrEmpty(commandLineArgs))
+					if (string.IsNullOrWhiteSpace(serviceName) is false)
 					{
-						processStartInfo.Arguments = commandLineArgs;
+						StartService(serviceName);
 					}
+					else
+					{ 
+						string executablePath = string.IsNullOrWhiteSpace(updatedExe)
+							? currentExe
+							: Path.Combine(extractionPath, updatedExe);
+						var processStartInfo = new ProcessStartInfo(executablePath);
+						if (!string.IsNullOrEmpty(commandLineArgs))
+						{
+							processStartInfo.Arguments = commandLineArgs;
+						}
 
-					Process.Start(processStartInfo);
-
-					_logBuilder.AppendLine("Successfully launched the updated application.");
+						Process.Start(processStartInfo);
+					}
+					LogBuilder.AppendLine("Successfully launched the updated application.");
 				}
 				catch (Win32Exception exception)
 				{
@@ -308,28 +335,65 @@ public partial class FormMain : Form
 			}
 			catch (Exception exception)
 			{
-				_logBuilder.AppendLine();
-				_logBuilder.AppendLine(exception.ToString());
+				LogBuilder.AppendLine();
+				LogBuilder.AppendLine(exception.ToString());
 
 				MessageBox.Show(this, exception.Message, exception.GetType().ToString(),
 					MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
 			finally
 			{
-				_logBuilder.AppendLine();
+				LogBuilder.AppendLine();
 				Application.Exit();
 			}
 		};
 
-		_backgroundWorker.RunWorkerAsync();
+		BackgroundTask.RunWorkerAsync();
+	}
+
+	private void StartService(string serviceName, string? arguments = null)
+	{
+		// Execute "sc start {serviceName}" and wait for it to finish
+		LogBuilder.AppendLine($"Starting service \"{serviceName}\".");
+
+		Process process = Process.Start(new ProcessStartInfo
+		{
+			FileName = "sc.exe",
+			Arguments = $"start \"{serviceName}\"",
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			ArgumentList = { arguments },
+			UseShellExecute = false,
+			CreateNoWindow = true,
+		});
+
+		process.WaitForExit();
+	}
+
+	private void StopService(string serviceName, int progress)
+	{
+		// Execute "sc stop {serviceName}" and wait for it to finish.
+		LogBuilder.AppendLine($"Stopping service \"{serviceName}\".");
+		BackgroundTask.ReportProgress(progress, $"Stopping service \"{serviceName}\".");
+		Process process = Process.Start(new ProcessStartInfo
+		{
+			FileName = "sc.exe",
+			Arguments = $"stop \"{serviceName}\"",
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		});
+
+		process.WaitForExit();
 	}
 
 	private void FormMain_FormClosing(object sender, FormClosingEventArgs e)
 	{
-		_backgroundWorker?.CancelAsync();
+		BackgroundTask?.CancelAsync();
 
-		_logBuilder.AppendLine();
+		LogBuilder.AppendLine();
 		File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ZipExtractor.log"),
-			_logBuilder.ToString());
+			LogBuilder.ToString());
 	}
 }

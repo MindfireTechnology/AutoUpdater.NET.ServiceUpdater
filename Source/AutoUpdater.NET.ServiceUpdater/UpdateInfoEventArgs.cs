@@ -55,6 +55,12 @@ public class UpdateInfoEventArgs : EventArgs
 	[XmlElement("version")]
 	public string CurrentVersion { get; set; }
 
+
+	/// <summary>Returns the name of the service we're updating (if applicable)</summary>
+	[XmlElement("service")]
+	public string SerivceName { get; set; }
+
+
 	/// <summary>
 	///     Returns version of the application currently installed on the user's PC.
 	/// </summary>

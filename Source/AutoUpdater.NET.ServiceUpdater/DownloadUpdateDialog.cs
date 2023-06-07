@@ -207,6 +207,12 @@ internal partial class DownloadUpdateDialog : Form
 					arguments.Add(" --clear");
 				}
 
+				if (string.IsNullOrWhiteSpace(_args.SerivceName) is false)
+				{
+					arguments.Add("--service-name");
+					arguments.Add(_args.SerivceName);
+				}
+
 				string[] args = Environment.GetCommandLineArgs();
 				if (args.Length > 1)
 				{

@@ -6,6 +6,7 @@ using System.IO;
 using System.Net;
 using System.Net.Cache;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Windows;
 using System.Windows.Forms;
