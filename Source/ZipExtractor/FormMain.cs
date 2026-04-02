@@ -16,11 +16,15 @@ namespace ZipExtractor;
 public partial class FormMain : Form
 {
 	private const int MaxRetries = 2;
-	protected StringBuilder LogBuilder { get; init; } = new();
+	protected TextWriter Log { get; init; }
 	protected BackgroundWorker BackgroundTask { get; init; }
 
 	public FormMain()
 	{
+		// Open up a log file for writing.
+		string fileName = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ZipExtractor.log");
+		Log = new StreamWriter(fileName, append: true);
+
 		BackgroundTask = new BackgroundWorker
 		{
 			WorkerReportsProgress = true,
@@ -40,9 +44,9 @@ public partial class FormMain : Form
 		string commandLineArgs = null;
 		string serviceName = null;
 
-		LogBuilder.AppendLine(DateTime.Now.ToString("F"));
-		LogBuilder.AppendLine();
-		LogBuilder.AppendLine("ZipExtractor started with following command line arguments.");
+		Log.WriteLine(DateTime.Now.ToString("F"));
+		Log.WriteLine();
+		Log.WriteLine("ZipExtractor started with following command line arguments.");
 
 		string[] args = Environment.GetCommandLineArgs();
 		for (var index = 0; index < args.Length; index++)
@@ -79,10 +83,10 @@ public partial class FormMain : Form
 					break;
 			}
 
-			LogBuilder.AppendLine($"[{index}] {arg}");
+			Log.WriteLine($"[{index}] {arg}");
 		}
 
-		LogBuilder.AppendLine();
+		Log.WriteLine();
 
 		if (string.IsNullOrEmpty(zipPath) || string.IsNullOrEmpty(extractionPath) || string.IsNullOrEmpty(currentExe))
 		{
@@ -92,30 +96,29 @@ public partial class FormMain : Form
 		// Extract all the files.
 		BackgroundTask.DoWork += (_, eventArgs) =>
 		{
-			LogBuilder.AppendLine("BackgroundWorker started successfully.");
+			Log.WriteLine("BackgroundWorker started successfully.");
 
 			if (string.IsNullOrWhiteSpace(serviceName) is false)
 			{
 				StopService(serviceName, 5);
 			}
-			else
-			{ 
-				foreach (Process process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(currentExe)))
-					try
-					{
-						if (process.MainModule is { FileName: not null } && process.MainModule.FileName.Equals(currentExe))
-						{
-							LogBuilder.AppendLine("Waiting for application process to exit...");
 
-							BackgroundTask.ReportProgress(0, "Waiting for application to exit...");
-							process.WaitForExit();
-						}
-					}
-					catch (Exception exception)
+			foreach (Process process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(currentExe)))
+				try
+				{
+					if (process.MainModule is { FileName: not null } && process.MainModule.FileName.Equals(currentExe))
 					{
-						Debug.WriteLine(exception.Message);
+						Log.WriteLine("Waiting for application process to exit...");
+
+						BackgroundTask.ReportProgress(0, "Waiting for application to exit...");
+						process.WaitForExit();
 					}
-			}
+				}
+				catch (Exception exception)
+				{
+					Debug.WriteLine(exception.Message);
+					Log.WriteLine(exception);
+				}
 
 
 			// Ensures that the last character on the extraction path
@@ -137,26 +140,26 @@ public partial class FormMain : Form
 
 				if (clearAppDirectory)
 				{
-					LogBuilder.AppendLine($"Removing all files and folders from \"{extractionPath}\".");
+					Log.WriteLine($"Removing all files and folders from \"{extractionPath}\".");
 					var directoryInfo = new DirectoryInfo(extractionPath);
 
 					foreach (FileInfo file in directoryInfo.GetFiles())
 					{
-						LogBuilder.AppendLine($"Removing a file located at \"{file.FullName}\".");
+						Log.WriteLine($"Removing a file located at \"{file.FullName}\".");
 						BackgroundTask.ReportProgress(0, string.Format(Resources.Removing, file.FullName));
 						file.Delete();
 					}
 
 					foreach (DirectoryInfo directory in directoryInfo.GetDirectories())
 					{
-						LogBuilder.AppendLine(
+						Log.WriteLine(
 							$"Removing a directory located at \"{directory.FullName}\" and all its contents.");
 						BackgroundTask.ReportProgress(0, string.Format(Resources.Removing, directory.FullName));
 						directory.Delete(true);
 					}
 				}
 
-				LogBuilder.AppendLine($"Found total of {entries.Count} files and folders inside the zip file.");
+				Log.WriteLine($"Found total of {entries.Count} files and folders inside the zip file.");
 
 				for (var index = 0; index < entries.Count; index++)
 				{
@@ -267,7 +270,7 @@ public partial class FormMain : Form
 					progress = (index + 1) * 100 / entries.Count;
 					BackgroundTask.ReportProgress(progress, currentFile);
 
-					LogBuilder.AppendLine($"{currentFile} [{progress}%]");
+					Log.WriteLine($"{currentFile} [{progress}%]");
 				}
 			}
 			finally
@@ -323,7 +326,7 @@ public partial class FormMain : Form
 
 						Process.Start(processStartInfo);
 					}
-					LogBuilder.AppendLine("Successfully launched the updated application.");
+					Log.WriteLine("Successfully launched the updated application.");
 				}
 				catch (Win32Exception exception)
 				{
@@ -335,15 +338,15 @@ public partial class FormMain : Form
 			}
 			catch (Exception exception)
 			{
-				LogBuilder.AppendLine();
-				LogBuilder.AppendLine(exception.ToString());
+				Log.WriteLine();
+				Log.WriteLine(exception.ToString());
 
 				MessageBox.Show(this, exception.Message, exception.GetType().ToString(),
 					MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
 			finally
 			{
-				LogBuilder.AppendLine();
+				Log.WriteLine();
 				Application.Exit();
 			}
 		};
@@ -354,17 +357,16 @@ public partial class FormMain : Form
 	private void StartService(string serviceName, string? arguments = null)
 	{
 		// Execute "sc start {serviceName}" and wait for it to finish
-		LogBuilder.AppendLine($"Starting service \"{serviceName}\".");
+		Log.WriteLine($"Starting service \"{serviceName}\".");
 
 		Process process = Process.Start(new ProcessStartInfo
 		{
+			//FileName = "cmd.exe",
 			FileName = "sc.exe",
 			Arguments = $"start \"{serviceName}\"",
-			RedirectStandardOutput = true,
-			RedirectStandardError = true,
-			ArgumentList = { arguments },
-			UseShellExecute = false,
-			CreateNoWindow = true,
+			Verb = "runas",
+			UseShellExecute = true,
+			//CreateNoWindow = true,
 		});
 
 		process.WaitForExit();
@@ -373,16 +375,14 @@ public partial class FormMain : Form
 	private void StopService(string serviceName, int progress)
 	{
 		// Execute "sc stop {serviceName}" and wait for it to finish.
-		LogBuilder.AppendLine($"Stopping service \"{serviceName}\".");
+		Log.WriteLine($"Stopping service \"{serviceName}\".");
 		BackgroundTask.ReportProgress(progress, $"Stopping service \"{serviceName}\".");
 		Process process = Process.Start(new ProcessStartInfo
 		{
 			FileName = "sc.exe",
 			Arguments = $"stop \"{serviceName}\"",
-			RedirectStandardOutput = true,
-			RedirectStandardError = true,
-			UseShellExecute = false,
-			CreateNoWindow = true
+			UseShellExecute = true,
+			//CreateNoWindow = true
 		});
 
 		process.WaitForExit();
@@ -392,8 +392,7 @@ public partial class FormMain : Form
 	{
 		BackgroundTask?.CancelAsync();
 
-		LogBuilder.AppendLine();
-		File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ZipExtractor.log"),
-			LogBuilder.ToString());
+		Log.WriteLine();
+		Log.Close();
 	}
 }

@@ -565,7 +565,7 @@ public static class AutoUpdater
 	}
 
 	/// <summary>
-	///     Detects and exits all instances of running assembly, including current.
+	/// Detects and exits all instances of running assembly, including current.
 	/// </summary>
 	internal static void Exit()
 	{
